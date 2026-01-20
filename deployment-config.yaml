@@ -1,0 +1,8 @@
+template-file-path: tp-stack.yaml
+parameters:
+  Environment: dev
+  InstanceType: t3.micro
+ 
+tags:
+  Project: tp-stack
+  Environment: dev
