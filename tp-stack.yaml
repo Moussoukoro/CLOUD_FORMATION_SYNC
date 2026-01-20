@@ -1,0 +1,622 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'InfraAWS - Stack Complete (IAM + EC2 + S3)'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environnement de déploiement
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t2.micro
+    Description: Type d'instance EC2
+
+Resources:
+  # ==========================================
+  # SECTION 1 : IAM - GROUPES ET UTILISATEURS
+  # ==========================================
+  
+  # GROUPE A - Développeurs
+  GroupA:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: !Sub 'InfraAWS-GroupA-Developers-${Environment}'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess      
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Path: /InfraAWS/
+
+  GroupAPolicyCloudFormation:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GroupA-CloudFormation-Policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudformation:*
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:PassRole
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:CreateInstanceProfile
+              - iam:DeleteInstanceProfile
+              - iam:AddRoleToInstanceProfile
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:GetInstanceProfile
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:TagInstanceProfile
+              - iam:UntagInstanceProfile
+              - iam:TagPolicy
+              - iam:UntagPolicy
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ec2:Describe*
+              - elasticloadbalancing:Describe*
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Resource: 
+              - !Sub 'arn:aws:ssm:*:*:parameter/aws/service/ami-amazon-linux-latest/*'
+              - !Sub 'arn:aws:ssm:*:*:parameter/aws/service/ami-windows-latest/*'
+      Groups:
+        - !Ref GroupA
+
+  UserA1:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'MD7-dev-${Environment}'
+      Groups:
+        - !Ref GroupA
+      Tags:
+        - Key: Team
+          Value: Development
+        - Key: Group
+          Value: A
+
+  UserA2:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'Abdou-dev-${Environment}'
+      Groups:
+        - !Ref GroupA
+      Tags:
+        - Key: Team
+          Value: Development
+        - Key: Group
+          Value: A
+
+  # GROUPE B - Testeurs / QA
+  GroupB:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: !Sub 'InfraAWS-GroupB-Testers-${Environment}'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+      Path: /InfraAWS/
+
+  GroupBPolicyCloudFormation:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GroupB-CloudFormation-ReadOnly-Policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudformation:Describe*
+              - cloudformation:List*
+              - cloudformation:Get*
+            Resource: '*'
+      Groups:
+        - !Ref GroupB
+
+  GroupBPolicyS3:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GroupB-S3-Upload-Policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:DeleteObject
+            Resource: 
+              - !Sub 'arn:aws:s3:::infraaws-site-${AWS::AccountId}'
+              - !Sub 'arn:aws:s3:::infraaws-site-${AWS::AccountId}/*'
+      Groups:
+        - !Ref GroupB
+
+  UserB1:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'Mohamed-qa-${Environment}'
+      Groups:
+        - !Ref GroupB
+      Tags:
+        - Key: Team
+          Value: QA
+        - Key: Group
+          Value: B
+
+  UserB2:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'SerigneMor-qa-${Environment}'
+      Groups:
+        - !Ref GroupB
+      Tags:
+        - Key: Team
+          Value: QA
+        - Key: Group
+          Value: B
+
+  # GROUPE C - Administrateurs
+  GroupC:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: !Sub 'InfraAWS-GroupC-Admins-${Environment}'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: /InfraAWS/
+
+  UserC1:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'Bachir-admin-${Environment}'
+      Groups:
+        - !Ref GroupC
+      Tags:
+        - Key: Team
+          Value: Administration
+        - Key: Group
+          Value: C
+
+  UserC2:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'Ndeye-admin-${Environment}'
+      Groups:
+        - !Ref GroupC
+      Tags:
+        - Key: Team
+          Value: Administration
+        - Key: Group
+          Value: C
+
+  # ==========================================
+  # SECTION 2 : S3 - BUCKET DE STOCKAGE
+  # ==========================================
+  
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'infraaws-site-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Name
+          Value: !Sub 'InfraAWS-site-${Environment}'
+        - Key: Project
+          Value: InfraAWS
+        - Key: Environment
+          Value: !Ref Environment
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${WebsiteBucket.Arn}/*'
+
+  # ==========================================
+  # SECTION 3 : EC2 - INSTANCE ET SECURITE
+  # ==========================================
+  
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'InfraAWS-EC2-SG-${Environment}'
+      GroupDescription: Security Group pour instance EC2 InfraAWS
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH Access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP Access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS Access
+      Tags:
+        - Key: Name
+          Value: !Sub 'InfraAWS-EC2-SG-${Environment}'
+        - Key: Project
+          Value: InfraAWS
+
+  InfraAWSEC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: WebsiteBucket
+    Properties:
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          
+          exec > >(tee /var/log/user-data.log)
+          exec 2>&1
+          
+          echo "=========================================="
+          echo "Démarrage configuration InfraAWS"
+          echo "=========================================="
+          date
+          
+          # Mise à jour
+          dnf update -y
+          
+          # Installation Apache
+          dnf install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          
+          # Création page web
+          cat > /var/www/html/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="fr">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>InfraAWS - Serveur EC2</title>
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      min-height: 100vh;
+                      display: flex;
+                      justify-content: center;
+                      align-items: center;
+                      padding: 20px;
+                  }
+                  .container {
+                      background: rgba(255, 255, 255, 0.95);
+                      border-radius: 20px;
+                      padding: 50px;
+                      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                      max-width: 900px;
+                      width: 100%;
+                  }
+                  h1 {
+                      color: #667eea;
+                      font-size: 3.5em;
+                      margin-bottom: 15px;
+                      text-align: center;
+                      text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+                  }
+                  .subtitle {
+                      text-align: center;
+                      color: #666;
+                      margin-bottom: 40px;
+                      font-size: 1.3em;
+                  }
+                  .status {
+                      background: linear-gradient(135deg, #10b981, #059669);
+                      color: white;
+                      padding: 15px 30px;
+                      border-radius: 25px;
+                      display: inline-block;
+                      margin: 20px 0;
+                      font-weight: bold;
+                      box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+                  }
+                  .info-grid {
+                      display: grid;
+                      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                      gap: 25px;
+                      margin-top: 40px;
+                  }
+                  .info-card {
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      padding: 25px;
+                      border-radius: 15px;
+                      text-align: center;
+                      transition: transform 0.3s;
+                  }
+                  .info-card:hover {
+                      transform: translateY(-5px);
+                      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+                  }
+                  .info-card h3 {
+                      font-size: 0.95em;
+                      margin-bottom: 12px;
+                      opacity: 0.9;
+                      text-transform: uppercase;
+                  }
+                  .info-card p {
+                      font-size: 1.4em;
+                      font-weight: bold;
+                      word-break: break-all;
+                  }
+                  .footer {
+                      text-align: center;
+                      margin-top: 50px;
+                      padding-top: 30px;
+                      border-top: 2px solid #e5e7eb;
+                      color: #666;
+                  }
+                  .badge {
+                      background: #667eea;
+                      color: white;
+                      padding: 5px 12px;
+                      border-radius: 12px;
+                      font-size: 0.85em;
+                      margin: 0 5px;
+                  }
+                  .resource-list {
+                      background: #f9fafb;
+                      padding: 25px;
+                      border-radius: 15px;
+                      margin-top: 30px;
+                  }
+                  .resource-list h2 {
+                      color: #667eea;
+                      margin-bottom: 15px;
+                      font-size: 1.5em;
+                  }
+                  .resource-item {
+                      background: white;
+                      padding: 12px 18px;
+                      margin: 10px 0;
+                      border-radius: 8px;
+                      border-left: 4px solid #667eea;
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>🚀 InfraAWS</h1>
+                  <p class="subtitle">Infrastructure Complète Déployée</p>
+                  
+                  <div style="text-align: center;">
+                      <span class="status">✅ Serveur opérationnel</span>
+                  </div>
+                  
+                  <div class="info-grid">
+                      <div class="info-card">
+                          <h3>Instance ID</h3>
+                          <p id="instance-id">Chargement...</p>
+                      </div>
+                      <div class="info-card">
+                          <h3>Région AWS</h3>
+                          <p>REGION_VALUE</p>
+                      </div>
+                      <div class="info-card">
+                          <h3>IP Privée</h3>
+                          <p id="private-ip">Chargement...</p>
+                      </div>
+                      <div class="info-card">
+                          <h3>Hostname</h3>
+                          <p>HOSTNAME_VALUE</p>
+                      </div>
+                  </div>
+                  
+                  <div class="resource-list">
+                      <h2>📦 Ressources Déployées</h2>
+                      <div class="resource-item">
+                          <span><strong>IAM</strong> - 3 Groupes + 6 Utilisateurs</span>
+                          <span class="badge">✓</span>
+                      </div>
+                      <div class="resource-item">
+                          <span><strong>S3</strong> - Bucket: infraaws-site-ACCOUNT_ID</span>
+                          <span class="badge">✓</span>
+                      </div>
+                      <div class="resource-item">
+                          <span><strong>EC2</strong> - Instance t3.micro + EIP</span>
+                          <span class="badge">✓</span>
+                      </div>
+                      <div class="resource-item">
+                          <span><strong>VPC</strong> - Security Group configuré</span>
+                          <span class="badge">✓</span>
+                      </div>
+                  </div>
+                  
+                  <div class="footer">
+                      <p>
+                          <span class="badge">☁️ AWS CloudFormation</span>
+                          <span class="badge">🔧 Infrastructure as Code</span>
+                          <span class="badge">🎯 Stack Unique</span>
+                      </p>
+                      <p style="margin-top: 15px; font-weight: 500;">
+                          📦 Projet InfraAWS - Stack Complète
+                      </p>
+                  </div>
+              </div>
+              
+              <script>
+                  const base = 'http://169.254.169.254/latest/meta-data/';
+                  
+                  fetch(base + 'instance-id')
+                      .then(r => r.text())
+                      .then(id => document.getElementById('instance-id').textContent = id)
+                      .catch(() => document.getElementById('instance-id').textContent = 'N/A');
+                  
+                  fetch(base + 'local-ipv4')
+                      .then(r => r.text())
+                      .then(ip => document.getElementById('private-ip').textContent = ip)
+                      .catch(() => document.getElementById('private-ip').textContent = 'N/A');
+              </script>
+          </body>
+          </html>
+          EOF
+          
+          # Remplacer valeurs
+          REGION="${AWS::Region}"
+          ACCOUNT_ID="${AWS::AccountId}"
+          sed -i "s/REGION_VALUE/$REGION/g" /var/www/html/index.html
+          sed -i "s/HOSTNAME_VALUE/$(hostname)/g" /var/www/html/index.html
+          sed -i "s/ACCOUNT_ID/$ACCOUNT_ID/g" /var/www/html/index.html
+          
+          # Permissions
+          chown -R apache:apache /var/www/html
+          chmod -R 755 /var/www/html
+          
+          systemctl restart httpd
+          
+          echo "=========================================="
+          echo "✅ Configuration terminée"
+          date
+          echo "=========================================="
+      
+      Tags:
+        - Key: Name
+          Value: !Sub 'InfraAWS-Server-${Environment}'
+        - Key: Project
+          Value: InfraAWS
+        - Key: Environment
+          Value: !Ref Environment
+
+  EC2ElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref InfraAWSEC2Instance
+      Tags:
+        - Key: Name
+          Value: !Sub 'InfraAWS-EIP-${Environment}'
+        - Key: Project
+          Value: InfraAWS
+
+# ==========================================
+# OUTPUTS - TOUTES LES RESSOURCES
+# ==========================================
+Outputs:
+  # IAM Outputs
+  GroupAName:
+    Description: Nom du Groupe A (Developers)
+    Value: !Ref GroupA
+    Export:
+      Name: !Sub '${AWS::StackName}-GroupA'
+
+  GroupBName:
+    Description: Nom du Groupe B (Testers)
+    Value: !Ref GroupB
+    Export:
+      Name: !Sub '${AWS::StackName}-GroupB'
+
+  GroupCName:
+    Description: Nom du Groupe C (Admins)
+    Value: !Ref GroupC
+    Export:
+      Name: !Sub '${AWS::StackName}-GroupC'
+
+  ConsoleLoginURL:
+    Description: URL de connexion à la console AWS
+    Value: !Sub 'https://${AWS::AccountId}.signin.aws.amazon.com/console'
+
+  # S3 Outputs
+  BucketName:
+    Description: Nom du bucket S3
+    Value: !Ref WebsiteBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+
+  BucketArn:
+    Description: ARN du bucket
+    Value: !GetAtt WebsiteBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+
+  BucketURL:
+    Description: URL du bucket S3
+    Value: !Sub 'https://${WebsiteBucket}.s3.${AWS::Region}.amazonaws.com'
+
+  # EC2 Outputs
+  InstanceId:
+    Description: ID de l'instance EC2
+    Value: !Ref InfraAWSEC2Instance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceId'
+
+  PublicIP:
+    Description: Adresse IP publique (EIP)
+    Value: !Ref EC2ElasticIP
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicIP'
+
+  PublicDNS:
+    Description: DNS public de l'instance
+    Value: !GetAtt InfraAWSEC2Instance.PublicDnsName
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicDNS'
+
+  WebsiteURL:
+    Description: URL du site web hébergé sur EC2
+    Value: !Sub 'http://${EC2ElasticIP}'
+
+  SecurityGroupId:
+    Description: ID du Security Group
+    Value: !Ref EC2SecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'
+
+  # Summary Output
+  DeploymentSummary:
+    Description: Résumé du déploiement
+    Value: !Sub |
+      ✅ Stack déployée avec succès!
+      - IAM: 3 groupes, 6 utilisateurs
+      - S3: Bucket ${WebsiteBucket}
+      - EC2: Instance ${InfraAWSEC2Instance}
+      - IP Publique: ${EC2ElasticIP}
+      - Accès web: http://${EC2ElasticIP}
